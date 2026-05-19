@@ -2,7 +2,7 @@ package scene
 
 import (
 	"strings"
-	"story-ai/models"
+	"video-ai/models"
 )
 
 func AnalyzeScene(text string) (string, string, string) {

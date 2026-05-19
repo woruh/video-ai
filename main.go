@@ -1,6 +1,6 @@
 package main
 
-import "story-ai/server"
+import "video-ai/server"
 
 func main() {
 	server.StartServer()

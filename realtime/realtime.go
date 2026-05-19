@@ -1,8 +1,9 @@
-package main
+package realtime
 
 import (
-	"github.com/gorilla/websocket"
 	"net/http"
+
+	"github.com/gorilla/websocket"
 )
 
 var upgrader = websocket.Upgrader{
@@ -11,29 +12,31 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-var clients = make(map[*websocket.Conn]bool)
+var Clients = make(map[*websocket.Conn]bool)
 
-func wsHandler(w http.ResponseWriter, r *http.Request) {
+func WSHandler(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
 
-	clients[conn] = true
+	Clients[conn] = true
 
 	for {
 		_, _, err := conn.ReadMessage()
+
 		if err != nil {
-			delete(clients, conn)
+			delete(Clients, conn)
 			conn.Close()
 			break
 		}
 	}
 }
 
-func broadcast(message interface{}) {
-	for client := range clients {
+func Broadcast(message interface{}) {
+
+	for client := range Clients {
 		client.WriteJSON(message)
 	}
 }

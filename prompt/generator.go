@@ -2,7 +2,7 @@ package prompt
 
 import (
 	"strings"
-	"story-ai/models"
+	"video-ai/models"
 )
 
 func GeneratePrompt(scene models.Scene) string {

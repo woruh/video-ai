@@ -1,6 +1,6 @@
 package ai
 
-import "story-ai/config"
+import "video-ai/config"
 
 // -------------------------
 // CLIENT STRUCT

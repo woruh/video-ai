@@ -3,6 +3,8 @@ package ai
 import (
 	"sync"
 	"time"
+
+	"video-ai/realtime"
 )
 
 // -------------------------
@@ -59,27 +61,31 @@ func simulateProcessing(jobID string) {
 
 	for _, p := range progressSteps {
 
-	time.Sleep(3 * time.Second)
+		time.Sleep(3 * time.Second)
 
-	mutex.Lock()
+		mutex.Lock()
 
-	job := jobStore[jobID]
-	job.Progress = p
+		job := jobStore[jobID]
 
-	if p < 100 {
-		job.Status = "processing"
+		job.Progress = p
+
+		if p < 100 {
+			job.Status = "processing"
+		}
+
+		if p == 100 {
+
+			job.Status = "completed"
+
+			job.VideoURL =
+				"https://samplelib.com/lib/preview/mp4/sample-5s.mp4"
+		}
+
+		jobStore[jobID] = job
+
+		mutex.Unlock()
+
+		// 🔥 SEND LIVE UPDATE
+		realtime.Broadcast(job)
 	}
-
-	if p == 100 {
-		job.Status = "completed"
-		job.VideoURL = "https://samplelib.com/lib/preview/mp4/sample-5s.mp4"
-	}
-
-	jobStore[jobID] = job
-
-	mutex.Unlock()
-
-	// 🔥 SEND LIVE UPDATE
-	broadcast(job)
-}
 }
