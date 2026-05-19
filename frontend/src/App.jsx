@@ -1,57 +1,96 @@
-import { useState, useEffect } from "react"
+import { useEffect, useRef, useState } from "react"
 
 function App() {
 
+  // --------------------------------------------------
+  // STATE
+  // --------------------------------------------------
+
   const [story, setStory] = useState("")
   const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState(null)
+
   const [jobs, setJobs] = useState([])
   const [savedProjects, setSavedProjects] = useState([])
-  const socket = new WebSocket("ws://localhost:8080/ws")
 
-  // ----------------------------
+  const [selectedJob, setSelectedJob] = useState(null)
+
+  const [activeIndex, setActiveIndex] = useState(null)
+
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [currentScene, setCurrentScene] = useState(0)
+
+  const [isExporting, setIsExporting] = useState(false)
+  const [exportProgress, setExportProgress] = useState(0)
+  const [finalMovieUrl, setFinalMovieUrl] = useState("")
+
+  const timelineRef = useRef(null)
+  const [draggedIndex, setDraggedIndex] = useState(null)
+
+  const [resizingIndex, setResizingIndex] = useState(null)
+  const [startX, setStartX] = useState(0)
+
+  // --------------------------------------------------
+  // AUDIO + SUBTITLES
+  // --------------------------------------------------
+
+  const audioTracks = [
+    {
+      id: 1,
+      name: "Cinematic Theme",
+      duration: "2:14",
+    },
+    {
+      id: 2,
+      name: "Ambient Tension",
+      duration: "1:42",
+    },
+  ]
+
+  const subtitles = [
+    {
+      id: 1,
+      text: "The journey begins...",
+    },
+    {
+      id: 2,
+      text: "A mysterious shadow appears...",
+    },
+    {
+      id: 3,
+      text: "Everything changes forever.",
+    },
+  ]
+
+  // --------------------------------------------------
   // GENERATE MOVIE
-  // ----------------------------
+  // --------------------------------------------------
+
   async function generateMovie() {
 
     setLoading(true)
 
     try {
 
-      const response = await fetch("http://localhost:8080/generate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          story: story,
-        }),
-      })
+      const response = await fetch(
+        "http://localhost:8080/generate",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            story,
+          }),
+        }
+      )
 
       const data = await response.json()
 
-      setResult(data)
-      setJobs(data.jobs || [])
-      const newProject = {
-  id: Date.now(),
-  title: story.slice(0, 30) || "Untitled Project",
-  story: story,
-  jobs: data.jobs || [],
-  createdAt: new Date().toLocaleString(),
-}
+      const generatedJobs = data.jobs || []
 
-const updatedProjects = [
-  newProject,
-  ...savedProjects,
-]
+      setJobs(generatedJobs)
 
-setSavedProjects(updatedProjects)
-
-localStorage.setItem(
-  "quietmoon-projects",
-  JSON.stringify(updatedProjects)
-)
-
+      saveProject(generatedJobs)
 
     } catch (err) {
       console.error(err)
@@ -60,148 +99,314 @@ localStorage.setItem(
     setLoading(false)
   }
 
-  // ----------------------------
+  // --------------------------------------------------
+  // SAVE PROJECT
+  // --------------------------------------------------
+
+  function saveProject(projectJobs) {
+
+    const newProject = {
+      id: Date.now(),
+      title: story.slice(0, 30) || "Untitled Project",
+      story,
+      jobs: projectJobs,
+      createdAt: new Date().toLocaleString(),
+    }
+
+    const updatedProjects = [
+      newProject,
+      ...savedProjects,
+    ]
+
+    setSavedProjects(updatedProjects)
+
+    localStorage.setItem(
+      "quietmoon-projects",
+      JSON.stringify(updatedProjects)
+    )
+  }
+
+  // --------------------------------------------------
   // CHECK STATUS
-  // ----------------------------
+  // --------------------------------------------------
+
   async function checkStatus(jobId) {
 
-    const res = await fetch(
+    const response = await fetch(
       `http://localhost:8080/status?id=${jobId}`
     )
 
-    return await res.json()
+    return await response.json()
   }
+
+  // --------------------------------------------------
+  // POLLING
+  // --------------------------------------------------
 
   useEffect(() => {
 
-  const saved = localStorage.getItem("quietmoon-projects")
+    if (jobs.length === 0) return
 
-  if (saved) {
-    setSavedProjects(JSON.parse(saved))
+    const interval = setInterval(async () => {
+
+      const updatedJobs = await Promise.all(
+
+        jobs.map(async (job) => {
+
+          const status = await checkStatus(job.job_id)
+
+          return {
+            ...job,
+            status: status.status,
+            progress: status.progress,
+            video_url: status.video_url,
+           duration: Math.floor(Math.random() * 8) + 5,
+            thumbnail: generateThumbnail(job.scene_number),
+          }
+        })
+      )
+
+      const processingIndex = updatedJobs.findIndex(
+        (job) => job.status === "processing"
+      )
+
+      setActiveIndex(processingIndex)
+
+      setJobs(updatedJobs)
+
+    }, 2000)
+
+    return () => clearInterval(interval)
+
+  }, [jobs])
+
+  // --------------------------------------------------
+  // PLAYBACK
+  // --------------------------------------------------
+
+  useEffect(() => {
+
+    if (!isPlaying) return
+    if (jobs.length === 0) return
+
+    const interval = setInterval(() => {
+
+      setCurrentScene((prev) => {
+
+        const next = prev + 1
+
+        if (next >= jobs.length) {
+          setIsPlaying(false)
+          return prev
+        }
+
+        return next
+      })
+
+    }, 4000)
+
+    return () => clearInterval(interval)
+
+  }, [isPlaying, jobs])
+
+  useEffect(() => {
+
+  function onMouseMove(e) {
+  if (resizingIndex === null) return
+
+  const diff = e.clientX - startX
+
+  const updatedJobs = [...jobs]
+
+  // convert current duration safely
+  let newDuration =
+    Number(updatedJobs[resizingIndex].duration) + diff / 50
+
+  if (newDuration < 1) newDuration = 1
+
+  updatedJobs[resizingIndex] = {
+    ...updatedJobs[resizingIndex],
+    duration: newDuration,
   }
-  socket.onmessage = (event) => {
 
-  const updatedJob = JSON.parse(event.data)
-
-  setJobs((prev) =>
-    prev.map((job) =>
-      job.job_id === updatedJob.job_id
-        ? updatedJob
-        : job
-    )
-  )
+  setJobs(updatedJobs)
 }
 
-}, [])
+  function onMouseUp() {
+    setResizingIndex(null)
+  }
 
-  // ----------------------------
-  // POLLING
-  // ----------------------------
-  useEffect(() => {
+  window.addEventListener("mousemove", onMouseMove)
+  window.addEventListener("mouseup", onMouseUp)
 
-  if (jobs.length === 0) return
+  return () => {
+    window.removeEventListener("mousemove", onMouseMove)
+    window.removeEventListener("mouseup", onMouseUp)
+  }
 
-  let isCompleted = false
+}, [resizingIndex, startX, jobs])
 
-  const interval = setInterval(async () => {
+  // --------------------------------------------------
+  // HELPERS
+  // --------------------------------------------------
 
-    const updatedJobs = await Promise.all(
-      jobs.map(async (job) => {
+ function handleResizeStart(e, index) {
+  setResizingIndex(index)
+  setStartX(e.clientX)
+}
 
-        const status = await checkStatus(job.job_id)
+  function generateThumbnail(sceneNumber) {
 
-        if (status.status === "completed") {
-          isCompleted = true
-        }
+    const images = [
+      "https://images.unsplash.com/photo-1501785888041-af3ef285b470",
+      "https://images.unsplash.com/photo-1521737604893-d14cc237f11d",
+      "https://images.unsplash.com/photo-1507525428034-b723cf961d3e",
+      "https://images.unsplash.com/photo-1472214103451-9374bd1c798e",
+    ]
 
-        return {
-          ...job,
-          status: status.status,
-          progress: status.progress,
-          video_url: status.video_url,
-        }
-      })
-    )
+    return images[sceneNumber % images.length]
+  }
 
-    
-    setJobs(updatedJobs)
+  function openPreview(job) {
+    setSelectedJob(job)
+  }
 
-    // 🛑 STOP POLLING WHEN ALL DONE
-    if (isCompleted) {
-      clearInterval(interval)
-    }
+  function startMovie() {
+    setIsPlaying(true)
+    setCurrentScene(0)
+  }
 
-  }, 2000) // faster updates (2s instead of 5s)
+  // --------------------------------------------------
+  // EXPORT MOVIE
+  // --------------------------------------------------
 
-  return () => clearInterval(interval)
+function handleDrop(targetIndex) {
+  if (draggedIndex === null) return
 
-}, [jobs])
-
-
-  // ----------------------------
-  // UI
-  // ----------------------------
-  function renameProject(projectId) {
-
-  const newTitle = prompt("Enter new project title")
-
-  if (!newTitle) return
-
-  const updatedProjects = savedProjects.map((project) => {
-
-    if (project.id === projectId) {
-      return {
-        ...project,
-        title: newTitle,
-      }
-    }
-
-    return project
+  setJobs((prev) => {
+    const updated = [...prev]
+    const [removed] = updated.splice(draggedIndex, 1)
+    updated.splice(targetIndex, 0, removed)
+    return updated
   })
 
-  setSavedProjects(updatedProjects)
-
-  localStorage.setItem(
-    "quietmoon-projects",
-    JSON.stringify(updatedProjects)
-  )
+  setDraggedIndex(null)
 }
+
+  function exportMovie() {
+
+    setIsExporting(true)
+    setExportProgress(0)
+
+    let progress = 0
+
+    const interval = setInterval(() => {
+
+      progress += 10
+
+      setExportProgress(progress)
+
+      if (progress >= 100) {
+
+        clearInterval(interval)
+
+        setIsExporting(false)
+
+        setFinalMovieUrl(
+          "https://samplelib.com/lib/preview/mp4/sample-20s.mp4"
+        )
+      }
+
+    }, 700)
+  }
+
+  // --------------------------------------------------
+  // PROJECT FUNCTIONS
+  // --------------------------------------------------
 
   function deleteProject(projectId) {
 
-  const updatedProjects = savedProjects.filter(
-    (project) => project.id !== projectId
-  )
+    const updatedProjects = savedProjects.filter(
+      (project) => project.id !== projectId
+    )
 
-  setSavedProjects(updatedProjects)
+    setSavedProjects(updatedProjects)
 
-  localStorage.setItem(
-    "quietmoon-projects",
-    JSON.stringify(updatedProjects)
-  )
-}
+    localStorage.setItem(
+      "quietmoon-projects",
+      JSON.stringify(updatedProjects)
+    )
+  }
+
+  function renameProject(projectId) {
+
+    const newTitle = prompt("Enter new project title")
+
+    if (!newTitle) return
+
+    const updatedProjects = savedProjects.map((project) => {
+
+      if (project.id === projectId) {
+        return {
+          ...project,
+          title: newTitle,
+        }
+      }
+
+      return project
+    })
+
+    setSavedProjects(updatedProjects)
+
+    localStorage.setItem(
+      "quietmoon-projects",
+      JSON.stringify(updatedProjects)
+    )
+  }
 
   function loadProject(project) {
 
-  setStory(project.story)
+    setStory(project.story)
 
-  setJobs(project.jobs || [])
+    setJobs(project.jobs || [])
+  }
 
-  setResult({
-    message: "Project loaded"
-  })
-}
+  // --------------------------------------------------
+  // UI
+  // --------------------------------------------------
 
   return (
+
     <div
       style={{
         minHeight: "100vh",
         background: "#0f172a",
         color: "white",
         padding: "40px",
-        fontFamily: "Arial"
+        fontFamily: "Arial",
       }}
     >
+
+      {/* ANIMATIONS */}
+      <style>
+        {`
+          @keyframes pulseGlow {
+            0% {
+              box-shadow: 0 0 10px rgba(56,189,248,0.4);
+            }
+
+            50% {
+              box-shadow: 0 0 30px rgba(56,189,248,0.9);
+            }
+
+            100% {
+              box-shadow: 0 0 10px rgba(56,189,248,0.4);
+            }
+          }
+        `}
+      </style>
+
+      {/* HEADER */}
 
       <h1 style={{ fontSize: "42px" }}>
         🎬 QuietMoon Studio
@@ -211,276 +416,466 @@ localStorage.setItem(
         Turn stories into cinematic AI movies
       </p>
 
-      <br />
+      {/* STORY INPUT */}
 
       <textarea
         rows="8"
-        cols="70"
         placeholder="Write your cinematic story..."
         value={story}
         onChange={(e) => setStory(e.target.value)}
         style={{
+          width: "100%",
+          maxWidth: "700px",
+          marginTop: "20px",
           padding: "20px",
           borderRadius: "12px",
           border: "none",
-          fontSize: "16px",
-          width: "100%",
-          maxWidth: "700px",
           background: "#1e293b",
-          color: "white"
+          color: "white",
+          fontSize: "16px",
         }}
       />
 
-      <br /><br />
+      {/* BUTTONS */}
 
-      <button
-        onClick={generateMovie}
-        style={{
-          padding: "15px 30px",
-          fontSize: "16px",
-          borderRadius: "10px",
-          border: "none",
-          cursor: "pointer",
-          background: "#7c3aed",
-          color: "white",
-          fontWeight: "bold"
-        }}
-      >
-        Generate Movie
-      </button>
+      <div style={{ marginTop: "20px" }}>
 
-      <br /><br />
+        <button onClick={generateMovie}>
+          Generate Movie
+        </button>
+
+        <button
+          onClick={startMovie}
+          style={{ marginLeft: "10px" }}
+        >
+          ▶ Play Movie
+        </button>
+
+        <button
+          onClick={exportMovie}
+          style={{ marginLeft: "10px" }}
+        >
+          🎬 Export
+        </button>
+
+      </div>
+
+      {/* LOADING */}
 
       {loading && (
-        <p style={{ color: "#cbd5e1" }}>
-          ⚡ Starting AI generation...
+        <p style={{ marginTop: "20px" }}>
+          ⚡ Generating scenes...
         </p>
       )}
-<div style={{ marginTop: "40px" }}>
 
-  <h2>📁 Saved Projects</h2>
+      {/* TIMELINE */}
 
-  {savedProjects.length === 0 && (
-    <p style={{ color: "#94a3b8" }}>
-      No saved projects yet
-    </p>
-  )}
+      <div style={{ marginTop: "50px" }}>
 
-  {savedProjects.map((project) => (
+        <h2>🎞 Scene Timeline</h2>
 
-    <div
-      key={project.id}
-      style={{
-        background: "#1e293b",
-        padding: "15px",
-        borderRadius: "12px",
-        marginTop: "15px",
-        border: "1px solid #334155"
-      }}
-    >
+        <div
+          ref={timelineRef}
+          style={{
+            display: "flex",
+            gap: "20px",
+            overflowX: "auto",
+            marginTop: "20px",
+            width: "100%",
+            minWidth: "120px",
+          }}
+        >
 
-    <h3 style={{ marginBottom: "10px" }}>
-  🎬 {project.title}
-</h3>
+          {jobs.map((job, index) => {
 
-      <p>
-        <strong>Created:</strong>
-        {" "}
-        {project.createdAt}
-      </p>
+            const isActive =
+              job.status === "processing"
 
-      <p style={{ marginTop: "10px" }}>
-        {project.story.slice(0, 120)}...
-      </p>
+            const isDone =
+              job.status === "completed"
 
-<button
-  onClick={() => loadProject(project)}
-  style={{
-    marginTop: "12px",
-    padding: "10px 16px",
-    borderRadius: "8px",
-    border: "none",
-    cursor: "pointer",
-    background: "#7c3aed",
-    color: "white"
-  }}
-  
->
-  Open Project
-</button>
-<button
-  onClick={() => deleteProject(project.id)}
-  style={{
-    marginTop: "12px",
-    marginLeft: "10px",
-    padding: "10px 16px",
-    borderRadius: "8px",
-    border: "none",
-    cursor: "pointer",
-    background: "#dc2626",
-    color: "white"
-  }}
->
-  Delete
-</button>
-<button
-  onClick={() => renameProject(project.id)}
-  style={{
-    marginTop: "12px",
-    marginLeft: "10px",
-    padding: "10px 16px",
-    borderRadius: "8px",
-    border: "none",
-    cursor: "pointer",
-    background: "#2563eb",
-    color: "white"
-  }}
->
-  Rename
-</button>
+            const isCurrent =
+              index === activeIndex
 
-    </div>
+            const isPlayingScene =
+              isPlaying && index === currentScene
 
-  ))}
+            return (
 
-</div>
+              
+            <div
+                key={index}
+                draggable
+                onClick={() => openPreview(job)}
+                onDragStart={() => setDraggedIndex(index)}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={() => handleDrop(index)}
+                style={{
+                  position:"relative",
+                  minWidth: "220px",
+                  background: isDone
+                    ? "#14532d"
+                    : "#1e293b",
 
-      {result && (
-        <div>
+                  border: isPlayingScene
+                    ? "2px solid #38bdf8"
+                    : isCurrent
+                      ? "2px solid #a855f7"
+                      : "2px solid transparent",
 
-          <h2 style={{ marginTop: "40px" }}>
-            🎥 Scene Jobs
-          </h2>
+                  transform: isPlayingScene
+                    ? "scale(1.05)"
+                    : "scale(1)",
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
-              gap: "20px",
-              marginTop: "20px"
-            }}
-          >
+                  animation: isPlayingScene
+                    ? "pulseGlow 1.5s infinite"
+                    : "none",
 
-            {jobs.map((job, index) => (
+                  borderRadius: "16px",
+                  padding: "20px",
+                  transition: "0.4s",
+                  cursor: "pointer",
+                  opacity: draggedIndex === index ? 0.5 : 1,
 
-              <div
-  key={index}
-  style={{
-    background:
-      job.status === "completed"
-        ? "#14532d"
-        : "#1e293b",
+                }}
+              >
 
-    padding: "20px",
-    borderRadius: "16px",
+                {/* THUMBNAIL */}
 
-    boxShadow:
-      job.status === "completed"
-        ? "0 0 20px rgba(34,197,94,0.4)"
-        : "0 0 10px rgba(0,0,0,0.3)",
+                <img
+                  src={job.thumbnail}
+                  alt="scene"
+                  style={{
+                    width: "100%",
+                    height: "120px",
+                    objectFit: "cover",
+                    borderRadius: "12px",
+                  }}
+                />
 
-    border:
-      job.status === "completed"
-        ? "1px solid #22c55e"
-        : "1px solid #334155",
+                {/* TITLE */}
 
-    transition: "0.5s"
-  }}
->
-
-                <h3>
+                <h3 style={{ marginTop: "15px" }}>
                   🎬 Scene {job.scene_number}
                 </h3>
 
-<div
-  style={{
-    height: "160px",
-    borderRadius: "12px",
-    background:
-      job.status === "completed"
-        ? "linear-gradient(to right, #4f46e5, #7c3aed)"
-        : "#0f172a",
+                {/* DURATION */}
 
-    marginTop: "15px",
-    marginBottom: "15px",
-
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-
-    fontSize: "50px"
-  }}
->
-  {job.status === "completed"
-    ? "🎥"
-    : "⚡"}
-</div>
-
-                <p>
-                  Status:
-                  {" "}
-                 <strong
-  style={{
-    color:
-      job.status === "completed"
-        ? "#4ade80"
-        : "#facc15"
-  }}
->
-  {job.status === "completed"
-    ? "✅ Completed"
-    : "⏳ Processing"}
-</strong>
+                <p style={{ color: "#94a3b8" }}>
+                  Duration: {job.duration}s
+              
                 </p>
 
-                {/* Progress Bar */}
+                  <div
+  onMouseDown={(e) => handleResizeStart(e, index)}
+  style={{
+    position: "absolute",
+    right: "0",
+    top: "0",
+    width: "6px",
+    height: "100%",
+    cursor: "ew-resize",
+    background: "rgba(255,255,255,0.1)"
+  }}
+/>
+                {/* PROGRESS */}
+
                 <div
                   style={{
+                    height: "12px",
                     background: "#334155",
-                    borderRadius: "10px",
+                    borderRadius: "999px",
                     overflow: "hidden",
-                    height: "20px",
-                    marginTop: "12px"
+                    marginTop: "15px",
                   }}
                 >
+
                   <div
                     style={{
                       width: `${job.progress || 0}%`,
-                      background: "#7c3aed",
                       height: "100%",
-                      transition: "0.5s"
+                      background: isDone
+                        ? "#22c55e"
+                        : "#7c3aed",
                     }}
                   />
+
                 </div>
 
-                <p style={{ marginTop: "8px" }}>
+                <p style={{ marginTop: "10px" }}>
                   {job.progress || 0}%
                 </p>
 
-                {job.video_url && (
-                  <div>
-
-                    <p style={{ color: "#38bdf8" }}>
-                      🎥 Video Ready
-                    </p>
-
-                    <a
-                      href={job.video_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{
-                        color: "#a78bfa"
-                      }}
-                    >
-                      Watch Video
-                    </a>
-
-                  </div>
-                )}
-
               </div>
+            )
+          })}
 
-            ))}
+        </div>
+
+      </div>
+
+
+
+      {/* AUDIO TRACK */}
+
+      <div style={{ marginTop: "40px" }}>
+
+        <h2>🔊 Audio Track</h2>
+
+        <div
+          style={{
+            display: "flex",
+            gap: "20px",
+            marginTop: "20px",
+          }}
+        >
+
+          {audioTracks.map((track) => (
+
+            <div
+              key={track.id}
+              style={{
+                background: "#14532d",
+                padding: "20px",
+                borderRadius: "12px",
+              }}
+            >
+
+              <h4>{track.name}</h4>
+
+              <p>{track.duration}</p>
+
+            </div>
+          ))}
+
+        </div>
+
+      </div>
+
+      {/* SUBTITLES */}
+
+      <div style={{ marginTop: "40px" }}>
+
+        <h2>💬 Subtitle Track</h2>
+
+        <div
+          style={{
+            display: "flex",
+            gap: "20px",
+            overflowX: "auto",
+            marginTop: "20px",
+          }}
+        >
+
+          {subtitles.map((sub) => (
+
+            <div
+              key={sub.id}
+              style={{
+                minWidth: "250px",
+                background: "#713f12",
+                padding: "20px",
+                borderRadius: "12px",
+              }}
+            >
+
+              {sub.text}
+
+            </div>
+          ))}
+
+        </div>
+
+      </div>
+
+      {/* SAVED PROJECTS */}
+
+      <div style={{ marginTop: "50px" }}>
+
+        <h2>📁 Saved Projects</h2>
+
+        {savedProjects.map((project) => (
+
+          <div
+            key={project.id}
+            style={{
+              background: "#1e293b",
+              padding: "20px",
+              borderRadius: "12px",
+              marginTop: "20px",
+            }}
+          >
+
+            <h3>
+              🎬 {project.title}
+            </h3>
+
+            <p style={{ color: "#94a3b8" }}>
+              {project.createdAt}
+            </p>
+
+            <div style={{ marginTop: "15px" }}>
+
+              <button
+                onClick={() => loadProject(project)}
+              >
+                Open
+              </button>
+
+              <button
+                onClick={() => renameProject(project.id)}
+                style={{ marginLeft: "10px" }}
+              >
+                Rename
+              </button>
+
+              <button
+                onClick={() => deleteProject(project.id)}
+                style={{ marginLeft: "10px" }}
+              >
+                Delete
+              </button>
+
+            </div>
+
+          </div>
+        ))}
+
+      </div>
+
+      {/* EXPORT MODAL */}
+
+      {isExporting && (
+
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.9)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+
+          <div
+            style={{
+              width: "500px",
+              background: "#0f172a",
+              padding: "30px",
+              borderRadius: "20px",
+            }}
+          >
+
+            <h1>🎬 Rendering Final Movie...</h1>
+
+            <div
+              style={{
+                height: "20px",
+                background: "#1e293b",
+                borderRadius: "999px",
+                overflow: "hidden",
+                marginTop: "20px",
+              }}
+            >
+
+              <div
+                style={{
+                  width: `${exportProgress}%`,
+                  height: "100%",
+                  background: "#22c55e",
+                }}
+              />
+
+            </div>
+
+            <h2 style={{ marginTop: "20px" }}>
+              {exportProgress}%
+            </h2>
+
+          </div>
+
+        </div>
+      )}
+
+      {/* FINAL MOVIE */}
+
+      {finalMovieUrl && (
+
+        <div style={{ marginTop: "50px" }}>
+
+          <h2>🍿 Final Exported Movie</h2>
+
+          <video
+            controls
+            style={{
+              width: "100%",
+              maxWidth: "900px",
+              borderRadius: "20px",
+              marginTop: "20px",
+            }}
+          >
+
+            <source src={finalMovieUrl} />
+
+          </video>
+
+        </div>
+      )}
+
+      {/* PREVIEW MODAL */}
+
+      {selectedJob && (
+
+
+        <div
+          onClick={() => setSelectedJob(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.8)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "80%",
+              maxWidth: "800px",
+              background: "#0f172a",
+              padding: "20px",
+              borderRadius: "20px",
+            }}
+          >
+
+            <h2>
+              🎬 Scene {selectedJob.scene_number}
+            </h2>
+
+            {selectedJob.video_url ? (
+
+              <video
+                controls
+                autoPlay
+                style={{
+                  width: "100%",
+                  marginTop: "20px",
+                  borderRadius: "12px",
+                }}
+              >
+
+                <source src={selectedJob.video_url} />
+
+              </video>
+
+            ) : (
+
+              <p>⏳ Video not ready yet...</p>
+
+            )}
 
           </div>
 

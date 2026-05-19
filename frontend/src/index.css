@@ -66,3 +66,18 @@ button:focus-visible {
     background-color: #f9f9f9;
   }
 }
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 10px rgba(168,85,247,0.4);
+  }
+  50% {
+    box-shadow: 0 0 25px rgba(168,85,247,0.8);
+  }
+  100% {
+    box-shadow: 0 0 10px rgba(168,85,247,0.4);
+  }
+}
+
+.processing {
+  animation: pulse 1.5s infinite;
+}
