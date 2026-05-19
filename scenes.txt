@@ -1,0 +1,18 @@
+Scene 1
+Text: The boy entered the village at night
+Emotion: fear
+Camera: wide shot
+Mood: dark
+
+Scene 2
+Text: He heard strange sounds
+Emotion: panic
+Camera: handheld
+Mood: intense
+
+Scene 3
+Text: A shadow followed him
+Emotion: fear
+Camera: wide shot
+Mood: dark
+

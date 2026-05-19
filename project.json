@@ -1,0 +1,16 @@
+[
+  {
+    "number": 1,
+    "text": "The boy entered the village at night",
+    "emotion": "fear",
+    "camera": "wide shot",
+    "mood": "dark"
+  },
+  {
+    "number": 2,
+    "text": "A shadow followed him",
+    "emotion": "fear",
+    "camera": "wide shot",
+    "mood": "dark"
+  }
+]
